@@ -3,9 +3,11 @@ on:
   push:
     branches:
       - master
+      - develop
   pull_request:
     branches:
       - master
+      - develop
 jobs:
   build:
     name: Autograding
@@ -17,7 +19,27 @@ jobs:
 
       - uses: docker/setup-buildx-action@v2
 
-      # TODO build and run unit tests
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v3
+        with:
+          dotnet-version: '9.x'
+
+      - name: Install dependencies
+        run: |
+          dotnet restore ./src/Booking.System/Booking.System.LoyaltyService/Booking.System.LoyaltyService.csproj
+          dotnet restore ./src/Booking.System/Booking.System.PaymentService/Booking.System.PaymentService.csproj
+          dotnet restore ./src/Booking.System/Booking.System.ReservationService/Booking.System.ReservationService.csproj
+          dotnet restore ./src/Booking.System/Booking.System.Gateway/Booking.System.Gateway.csproj
+
+      - name: Build
+        run: |
+          dotnet publish ./src/Booking.System/Booking.System.LoyaltyService/Booking.System.LoyaltyService.csproj -c Release
+          dotnet publish ./src/Booking.System/Booking.System.PaymentService/Booking.System.PaymentService.csproj -c Release
+          dotnet publish ./src/Booking.System/Booking.System.ReservationService/Booking.System.ReservationService.csproj -c Release
+          dotnet publish ./src/Booking.System/Booking.System.Gateway/Booking.System.Gateway.csproj -c Release
+
+      - name: Run Tests
+        run: dotnet test ./src/Booking.System/
 
       - name: Build images
         timeout-minutes: 10
@@ -27,33 +49,32 @@ jobs:
         timeout-minutes: 5
         run: |
           docker compose up -d
+          
+          sleep 20
+          
           ./scripts/wait-script.sh
         env:
           WAIT_PORTS: 8080,8070,8060,8050
-
-      # TODO setup variant, service and port
 
       - name: Run API Tests
         timeout-minutes: 5
         run: ./scripts/test-script.sh
         env:
-          VARIANT: <variant>
-          SERVICE_NAME: <your service name>
-          PORT_NUMBER: <port number>
+          VARIANT: v2
+          SERVICE_NAME: bonus_service
+          PORT_NUMBER: 8050
+          
+      - name: Run containers
+        if: always()
+        timeout-minutes: 5
+        run: |
+          docker ps
+          docker compose logs
+          
 
       - uses: education/autograding@v1
         id: autograder
         continue-on-error: true
-
-      - name: Github auto grader mark
-        uses: Romanow/google-sheet-autograder-marker@v1.0
-        with:
-          google_token: ${{secrets.GOOGLE_API_KEY}}
-          sheet_id: "1xkgjUX6Qmk7rdJG-QPOToav-HWWtthJjnShIKnw3oIY"
-          homework_number: 3
-          user_column: 'D'
-          column_offset: 'F'
-          mark: "'+"
 
       - name: Stop containers
         if: always()

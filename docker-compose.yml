@@ -12,9 +12,56 @@ services:
       - db-data:/var/lib/postgresql/data
       - ./postgres/:/docker-entrypoint-initdb.d/
     ports:
-      - "5432:5432"
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
-# TODO добавить сервисы
+  loyalty_service:
+    container_name: loyalty_service
+    build:
+      context: src
+      dockerfile: Booking.System/Booking.System.LoyaltyService/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8050:8050"
+  
+  payment_service:
+    container_name: payment_service
+    build:
+      context: src
+      dockerfile: Booking.System/Booking.System.PaymentService/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8060:8060"
+  
+  reservation_service:
+    container_name: reservation_service
+    build:
+      context: src
+      dockerfile: Booking.System/Booking.System.ReservationService/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8070:8070"
+  
+  gateway_service:
+    container_name: gateway_service
+    build:
+      context: src
+      dockerfile: Booking.System/Booking.System.Gateway/Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
 
 volumes:
   db-data:
