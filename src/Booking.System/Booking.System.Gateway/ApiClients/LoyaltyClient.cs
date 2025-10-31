@@ -106,7 +106,7 @@ public class LoyaltyClient : ILoyaltyClient
 
                 return ServiceResponse<bool>.Success(true);
             },
-            ServiceResponse<bool>.Fallback(true)); // Для не-критичных операций возвращаем fallback
+            ServiceResponse<bool>.ServiceUnavailable("Loyalty"));
     }
 
     private class IncreaseBool
