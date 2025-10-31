@@ -20,10 +20,10 @@ public class UserInfoDto
     [Required]
     [DataMember(Name = "loyalty")]
     [JsonPropertyName("loyalty")]
-    public LoyaltyInfoDto Loyalty { get; set; }
+    public object? Loyalty  { get; set; }
     
     public UserInfoDto(List<ReservationDtoWithHotelAndPayment> reservations,
-        LoyaltyInfoDto loyalty)
+        object? loyalty)
     {
         Reservations = reservations;
         Loyalty = loyalty;

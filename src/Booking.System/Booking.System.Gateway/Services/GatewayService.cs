@@ -66,9 +66,19 @@ public class GatewayService : IGatewayService
 
         // 2. Получаем информацию о лояльности
         var loyaltyResponse = await _loyaltyClient.GetLoyaltyAsync(username);
-        var loyaltyInfo = loyaltyResponse.IsSuccess ? 
-            loyaltyResponse.Response : 
-            new LoyaltyInfoDto("", 0, 0);
+        object? loyaltyInfo = null; // Используем object чтобы можно было передать пустой объект
+    
+        if (loyaltyResponse.IsSuccess && loyaltyResponse.Response != null)
+        {
+            loyaltyInfo = loyaltyResponse.Response;
+        }
+        else
+        {
+            _logger.LogWarning("Loyalty service unavailable for user {Username}, returning empty object for loyalty", 
+                username);
+            // Fallback ответ - пустой объект {} для поля loyalty
+            loyaltyInfo = new { }; // Пустой анонимный объект
+        }
 
         var userInfo = new UserInfoDto(reservationsWithDetails, loyaltyInfo);
         return ServiceResponse<UserInfoDto>.Success(userInfo);
