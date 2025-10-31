@@ -192,22 +192,7 @@ public class GatewayService : IGatewayService
 
         // 6. Обновляем счетчик бронирований (не критичный)
         var loyaltyUpdateResponse = await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, true);
-        if (!loyaltyUpdateResponse.IsSuccess)
-        {
-            _logger.LogWarning("Loyalty service unavailable for reservation creation, adding to retry queue");
-            
-            _retryQueue.Enqueue(new RetryItem
-            {
-                OperationType = "UpdateLoyaltyAfterReservation",
-                Username = username,
-                Data = new { Increment = true },
-                Action = async () =>
-                {
-                    var retryResponse = await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, true);
-                    return retryResponse.IsSuccess;
-                }
-            });
-        }
+        
 
         var response = new CreateReservationResponse(
             reservationUid,
