@@ -64,5 +64,6 @@ public class Startup
             endpoints.MapControllers(); 
             endpoints.MapGet("/manage/health", () => Results.Ok(new { status = "Healthy", service = "gateway" }));
         });
+        
     }
 }
