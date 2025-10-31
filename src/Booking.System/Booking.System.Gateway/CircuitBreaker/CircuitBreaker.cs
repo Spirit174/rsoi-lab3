@@ -1,6 +1,5 @@
 ﻿using System.Collections.Concurrent;
 using Booking.System.Gateway.DTO;
-using Booking.System.Gateway.Services;
 
 namespace Booking.System.Gateway.CircuitBreaker;
 
@@ -11,14 +10,7 @@ public enum CircuitBreakerState
     HalfOpen
 }
 
-public interface ICircuitBreaker
-{
-    Task<T> ExecuteAsync<T>(string serviceName, Func<Task<T>> action, Func<T> fallback);
-    Task<ServiceResponse<T>> ExecuteAsync<T>(string serviceName, Func<Task<ServiceResponse<T>>> action, ServiceResponse<T> fallback);
-    void RegisterHealthCheck(string serviceName, Func<Task<bool>> healthCheck);
-}
-
-public class CircuitBreaker : ICircuitBreaker
+public class CircuitBreaker
 {
     private readonly ConcurrentDictionary<string, CircuitBreakerState> _states = new();
     private readonly ConcurrentDictionary<string, int> _failureCounts = new();

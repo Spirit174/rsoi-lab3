@@ -1,8 +1,6 @@
 using Booking.System.Gateway.ApiClients;
 using Booking.System.Gateway.Services;
-using GatewayService;
 using Microsoft.OpenApi.Models;
-using IRetryQueue = Booking.System.Gateway.Services.IRetryQueue;
 
 namespace Booking.System.Gateway;
 
@@ -29,7 +27,7 @@ public class Startup
         services.Configure<ClientsConfiguration>(Configuration.GetSection(nameof(ClientsConfiguration)));
         
         services.AddSingleton<CircuitBreaker.CircuitBreaker>();
-        services.AddSingleton<RetryQueue>();
+        services.AddSingleton<IRetryQueue, RetryQueue>();
         services.AddHostedService<RetryQueue>(provider =>
             (RetryQueue)provider.GetRequiredService<IRetryQueue>());
         

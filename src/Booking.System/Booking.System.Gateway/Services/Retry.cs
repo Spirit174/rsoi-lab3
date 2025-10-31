@@ -1,6 +1,6 @@
 ﻿using System.Collections.Concurrent;
 
-namespace GatewayService;
+namespace Booking.System.Gateway.Services;
 
 public class RetryItem
 {
