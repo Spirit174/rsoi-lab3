@@ -68,7 +68,7 @@ public class GatewayService : IGatewayService
         var loyaltyResponse = await _loyaltyClient.GetLoyaltyAsync(username);
         var loyaltyInfo = loyaltyResponse.IsSuccess ? 
             loyaltyResponse.Response : 
-            null;
+            new LoyaltyInfoDto("", 0, 0);
 
         var userInfo = new UserInfoDto(reservationsWithDetails, loyaltyInfo);
         return ServiceResponse<UserInfoDto>.Success(userInfo);
