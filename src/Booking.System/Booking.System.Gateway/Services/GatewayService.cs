@@ -68,7 +68,7 @@ public class GatewayService : IGatewayService
         var loyaltyResponse = await _loyaltyClient.GetLoyaltyAsync(username);
         var loyaltyInfo = loyaltyResponse.IsSuccess ? 
             loyaltyResponse.Response : 
-            new LoyaltyInfoDto("BRONZE", 0, 0);
+            null;
 
         var userInfo = new UserInfoDto(reservationsWithDetails, loyaltyInfo);
         return ServiceResponse<UserInfoDto>.Success(userInfo);
@@ -143,9 +143,14 @@ public class GatewayService : IGatewayService
 
         // 2. Получаем информацию о лояльности
         var loyaltyResponse = await _loyaltyClient.GetLoyaltyAsync(username);
-        var loyaltyInfo = loyaltyResponse.IsSuccess ? 
-            loyaltyResponse.Response! : 
-            new LoyaltyInfoDto("BRONZE", 0, 0);
+        if (!loyaltyResponse.IsSuccess)
+        {
+            _logger.LogError("Loyalty service unavailable for reservation creation: {Error}", 
+                loyaltyResponse.GetErrorMessage());
+            return ServiceResponse<CreateReservationResponse?>.ErrorResponse(
+                "Loyalty Service unavailable", 503);
+        }
+        var loyaltyInfo = loyaltyResponse.Response!;
 
         // 3. Рассчитываем стоимость
         var (totalPrice, countDays) = CalculateReservationPrice(request, hotel, loyaltyInfo);
