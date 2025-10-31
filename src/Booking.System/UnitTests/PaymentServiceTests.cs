@@ -108,7 +108,46 @@ public class PaymentServiceTests
         var error = Assert.IsType<ErrorResponse>(statusResult.Value);
         Assert.Equal("Неожиданная ошибка на стороне сервера.", error.Message);
     }
-    
+
+    [Fact]
+    public async Task UpdatePayment_SuccessfulCancel_ReturnsOk()
+    {
+        // Arrange
+        var paymentId = Guid.NewGuid();
+        
+        _paymentServiceMock
+            .Setup(x => x.CancelPayment(paymentId))
+            .ReturnsAsync(false);
+
+        // Act
+        var result = await _paymentController.UpdatePayment(paymentId);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+        _paymentServiceMock.Verify(x => x.CancelPayment(paymentId), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdatePayment_PaymentNotFound_ReturnsBadRequest()
+    {
+        // Arrange
+        var paymentId = Guid.NewGuid();
+        
+        _paymentServiceMock
+            .Setup(x => x.CancelPayment(paymentId))
+            .ReturnsAsync(true);
+
+        // Act
+        var result = await _paymentController.UpdatePayment(paymentId);
+
+        // Assert
+        var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
+        var error = Assert.IsType<ErrorResponse>(badRequestResult.Value);
+        
+        Assert.Equal("Нeт такого платежа.", error.Message);
+        _paymentServiceMock.Verify(x => x.CancelPayment(paymentId), Times.Once);
+    }
+
     [Fact]
     public async Task UpdatePayment_ServiceThrows_Returns500()
     {
@@ -161,6 +200,21 @@ public class PaymentServiceTests
         
         Assert.Equal(paymentId, paymentIdDto.PaymentId);
         _paymentServiceMock.Verify(x => x.CreatePayment(price), Times.Once);
+    }
+
+    [Fact]
+    public async Task UpdatePayment_CancelSuccess_ReturnsOk()
+    {
+        // Arrange
+        var paymentId = Guid.NewGuid();
+        _paymentServiceMock.Setup(x => x.CancelPayment(paymentId)).ReturnsAsync(false);
+
+        // Act
+        var result = await _paymentController.UpdatePayment(paymentId);
+
+        // Assert
+        Assert.IsType<OkResult>(result);
+        _paymentServiceMock.Verify(x => x.CancelPayment(paymentId), Times.Once);
     }
 
 
