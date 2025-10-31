@@ -40,9 +40,8 @@ public class LoyaltyClient : ILoyaltyClient
         }
     }
 
-    public async Task<LoyaltyInfoDto> GetLoyaltyAsync(string userName)
+    public async Task<ServiceResponse<LoyaltyInfoDto>> GetLoyaltyAsync(string userName)
     {
-        // Loyalty Service критичен для GET /api/v1/loyalty - бросаем исключение при недоступности
         return await _circuitBreaker.ExecuteAsync(
             "LoyaltyService",
             async () =>
@@ -54,20 +53,28 @@ public class LoyaltyClient : ILoyaltyClient
                     request.Method, requestUrl, userName);
 
                 var response = await _client.GetAsync(request);
+
+                // Обработка ошибок HTTP
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<LoyaltyInfoDto>.ErrorResponse(
+                        $"Loyalty API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
+
                 var loyaltyInfoDto = JsonConvert.DeserializeObject<LoyaltyInfoDto>(response.Content!);
 
                 _logger.LogInformation("Loyalty API call {Method} {RequestUrl} successfully. Loyalty {UserName} was got",
                     request.Method, requestUrl, userName);
 
-                return loyaltyInfoDto!;
+                return ServiceResponse<LoyaltyInfoDto>.Success(loyaltyInfoDto!);
             },
-            () => throw new Exception("Loyalty Service is unavailable for critical operation"));
+            ServiceResponse<LoyaltyInfoDto>.ServiceUnavailable("Loyalty"));
     }
-
-    public async Task UpdateLoyaltyReservationCountAsync(string userName, bool isIncrease)
+    
+    public async Task<ServiceResponse<bool>> UpdateLoyaltyReservationCountAsync(string userName, bool isIncrease)
     {
-        // Для не-критичных операций используем fallback (ничего не делаем при недоступности)
-        await _circuitBreaker.ExecuteAsync(
+        return await _circuitBreaker.ExecuteAsync(
             "LoyaltyService",
             async () =>
             {
@@ -83,19 +90,23 @@ public class LoyaltyClient : ILoyaltyClient
                 _logger.LogDebug("Loyalty API call {Method} {RequestUrl}. To update loyalty for username {UserName}",
                     request.Method, requestUrl, userName);
 
-                await _client.PostAsync(request);
+                var response = await _client.PostAsync(request);
+
+                // Обработка ошибок HTTP
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<bool>.ErrorResponse(
+                        $"Loyalty API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
 
                 _logger.LogInformation(
                     "Loyalty API call {Method} {RequestUrl} successfully. Loyalty {UserName} was updated",
                     request.Method, requestUrl, userName);
 
-                return true;
+                return ServiceResponse<bool>.Success(true);
             },
-            () => 
-            {
-                _logger.LogWarning("Loyalty Service unavailable for update operation for user {UserName}", userName);
-                return false;
-            });
+            ServiceResponse<bool>.Fallback(true)); // Для не-критичных операций возвращаем fallback
     }
 
     private class IncreaseBool

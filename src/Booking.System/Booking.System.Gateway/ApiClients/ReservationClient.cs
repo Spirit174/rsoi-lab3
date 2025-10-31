@@ -42,63 +42,79 @@ public class ReservationClient: IReservationClient
         }
     }
 
-    public async Task<HotelPagesDto> GetHotelsPageAsync(int page, int size)
-    {
-        // Reservation Service критичен для GET /api/v1/hotels - бросаем исключение
-        return await _circuitBreaker.ExecuteAsync(
-            "ReservationService",
-            async () =>
+    public async Task<ServiceResponse<HotelPagesDto>> GetHotelsPageAsync(int page, int size)
+{
+    return await _circuitBreaker.ExecuteAsync(
+        "ReservationService",
+        async () =>
+        {
+            var requestUrl = $"api/v1/hotels?page={page}&size={size}";
+            var request = new RestRequest(requestUrl, Method.Get);
+
+            _logger.LogDebug("Reservation API call {Method} {RequestUrl}. To get hotels page:{Page} with size:{Size}",
+                request.Method, requestUrl, page, size);
+
+            var response = await _client.GetAsync(request);
+            
+            if (!response.IsSuccessful)
             {
-                var requestUrl = $"api/v1/hotels?page={page}&size={size}";
-                var request = new RestRequest(requestUrl, Method.Get);
+                return ServiceResponse<HotelPagesDto>.ErrorResponse(
+                    $"Reservation API returned error: {response.StatusCode}", 
+                    (int)response.StatusCode);
+            }
 
-                _logger.LogDebug("Reservation API call {Method} {RequestUrl}. To get hotels page:{Page} with size:{Size}",
-                    request.Method, requestUrl, page, size);
+            var hotelsPages = JsonConvert.DeserializeObject<HotelPagesDto>(response.Content!);
 
-                var response = await _client.GetAsync(request);
-                var hotelsPages = JsonConvert.DeserializeObject<HotelPagesDto>(response.Content!);
+            _logger.LogInformation("Reservation API call {Method} {RequestUrl} successfully. Got hotels page:{Page} with size:{Size}",
+                request.Method, requestUrl, page, size);
 
-                _logger.LogInformation("Reservation API call {Method} {RequestUrl} successfully. Got hotels page:{Page} with size:{Size}",
-                    request.Method, requestUrl, page, size);
+            return ServiceResponse<HotelPagesDto>.Success(hotelsPages!);
+        },
+        ServiceResponse<HotelPagesDto>.ServiceUnavailable("Reservation Service"));
+}
 
-                return hotelsPages!;
-            },
-            () => throw new Exception("Reservation Service is unavailable for hotels operation"));
-    }
-    
-    public async Task<HotelDto> GetHotelByIdAsync(Guid hotelId)
-    {
-        // Получение отеля по ID критично
-        return await _circuitBreaker.ExecuteAsync(
-            "ReservationService",
-            async () =>
+public async Task<ServiceResponse<HotelDto>> GetHotelByIdAsync(Guid hotelId)
+{
+    return await _circuitBreaker.ExecuteAsync(
+        "ReservationService",
+        async () =>
+        {
+            var requestUrl = $"api/v1/hotels/{hotelId}";
+            var request = new RestRequest(requestUrl, Method.Get);
+
+            _logger.LogDebug("Reservation API call {Method} {RequestUrl}. To get hotel by Id {HotelId}",
+                request.Method, requestUrl, hotelId);
+
+            var response = await _client.GetAsync(request);
+            
+            if (response.StatusCode == HttpStatusCode.NotFound)
             {
-                var requestUrl = $"api/v1/hotels/{hotelId}";
-                var request = new RestRequest(requestUrl, Method.Get);
+                return ServiceResponse<HotelDto>.ErrorResponse(
+                    "No hotel was found", 
+                    (int)HttpStatusCode.NotFound);
+            }
 
-                _logger.LogDebug("Reservation API call {Method} {RequestUrl}. To get hotel by Id {HotelId}",
-                    request.Method, requestUrl, hotelId);
+            if (!response.IsSuccessful)
+            {
+                return ServiceResponse<HotelDto>.ErrorResponse(
+                    $"Reservation API returned error: {response.StatusCode}", 
+                    (int)response.StatusCode);
+            }
 
-                var response = await _client.GetAsync(request);
-                
-                if (response.StatusCode == HttpStatusCode.NotFound)
-                    throw new HotelNotFoundException("No hotel was found");
+            var hotel = JsonConvert.DeserializeObject<HotelDto>(response.Content!);
 
-                var hotel = JsonConvert.DeserializeObject<HotelDto>(response.Content!);
+            _logger.LogInformation(
+                "Reservation API call {Method} {RequestUrl} successfully. To got hotel by Id {HotelId}",
+                request.Method, requestUrl, hotelId);
 
-                _logger.LogInformation(
-                    "Reservation API call {Method} {RequestUrl} successfully. To got hotel by Id {HotelId}",
-                    request.Method, requestUrl, hotelId);
-
-                return hotel!;
-            },
-            () => throw new Exception("Reservation Service is unavailable"));
-    }
+            return ServiceResponse<HotelDto>.Success(hotel!);
+        },
+        ServiceResponse<HotelDto>.ServiceUnavailable("Reservation Service"));
+}
     
-    public async Task CancelReservation(Guid reservationId)
+    public async Task<ServiceResponse<bool>> CancelReservation(Guid reservationId)
     {
-        // Отмена бронирования критична
-        await _circuitBreaker.ExecuteAsync(
+        return await _circuitBreaker.ExecuteAsync(
             "ReservationService",
             async () =>
             {
@@ -111,20 +127,30 @@ public class ReservationClient: IReservationClient
                 var response = await _client.PostAsync(request);
                 
                 if (response.StatusCode == HttpStatusCode.NotFound)
-                    throw new ReservationNotFoundException("No reservation was found");
+                {
+                    return ServiceResponse<bool>.ErrorResponse(
+                        "No reservation was found", 
+                        (int)HttpStatusCode.NotFound);
+                }
+
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<bool>.ErrorResponse(
+                        $"Reservation API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
 
                 _logger.LogInformation(
                     "Reservation API call {Method} {RequestUrl} successfully. To cancel reservation by Id {ReservationId}",
                     request.Method, requestUrl, reservationId);
 
-                return true;
+                return ServiceResponse<bool>.Success(true);
             },
-            () => throw new Exception("Reservation Service is unavailable for cancel operation"));
+            ServiceResponse<bool>.ServiceUnavailable("Reservation Service"));
     }
     
-    public async Task<ReservationDto> GetReservationById(Guid reservationId)
+    public async Task<ServiceResponse<ReservationDto>> GetReservationById(Guid reservationId)
     {
-        // Reservation Service критичен для получения бронирования
         return await _circuitBreaker.ExecuteAsync(
             "ReservationService",
             async () =>
@@ -136,25 +162,35 @@ public class ReservationClient: IReservationClient
                     request.Method, requestUrl, reservationId);
 
                 var response = await _client.GetAsync(request);
-                
+            
                 if (response.StatusCode == HttpStatusCode.NotFound)
-                    throw new ReservationNotFoundException("No reservation was found");
-                
+                {
+                    return ServiceResponse<ReservationDto>.ErrorResponse(
+                        "No reservation was found", 
+                        (int)HttpStatusCode.NotFound);
+                }
+
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<ReservationDto>.ErrorResponse(
+                        $"Reservation API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
+            
                 var reservation = JsonConvert.DeserializeObject<ReservationDto>(response.Content!);
 
                 _logger.LogInformation(
                     "Reservation API call {Method} {RequestUrl} successfully. To got reservation by Id {ReservationId}",
                     request.Method, requestUrl, reservationId);
 
-                return reservation!;
+                return ServiceResponse<ReservationDto>.Success(reservation!);
             },
-            () => throw new Exception("Reservation Service is unavailable"));
+            ServiceResponse<ReservationDto>.ServiceUnavailable("Reservation Service"));
     }
     
-    public async Task CreateReservation(CreateReservationDto createReservationDto)
+    public async Task<ServiceResponse<bool>> CreateReservation(CreateReservationDto createReservationDto)
     {
-        // Создание бронирования критично
-        await _circuitBreaker.ExecuteAsync(
+        return await _circuitBreaker.ExecuteAsync(
             "ReservationService",
             async () =>
             {
@@ -165,20 +201,26 @@ public class ReservationClient: IReservationClient
                 _logger.LogDebug("Reservation API call {Method} {RequestUrl}. To create reservation with PaymentUid {PaymentUid}",
                     request.Method, requestUrl, createReservationDto.PaymentUid);
 
-                await _client.PostAsync(request);
+                var response = await _client.PostAsync(request);
+
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<bool>.ErrorResponse(
+                        $"Reservation API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
 
                 _logger.LogInformation(
                     "Reservation API call {Method} {RequestUrl} successfully. Created reservation with PaymentUid {PaymentUid}",
                     request.Method, requestUrl, createReservationDto.PaymentUid);
 
-                return true;
+                return ServiceResponse<bool>.Success(true);
             },
-            () => throw new Exception("Reservation Service is unavailable for reservation creation"));
+            ServiceResponse<bool>.ServiceUnavailable("Reservation Service"));
     }
     
-    public async Task<List<ReservationDto>> GetReservationByUsername(string userName)
+    public async Task<ServiceResponse<List<ReservationDto>>> GetReservationByUsername(string userName)
     {
-        // Получение списка бронирований критично
         return await _circuitBreaker.ExecuteAsync(
             "ReservationService",
             async () =>
@@ -190,15 +232,22 @@ public class ReservationClient: IReservationClient
                     request.Method, requestUrl, userName);
 
                 var response = await _client.GetAsync(request);
-                
+            
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<List<ReservationDto>>.ErrorResponse(
+                        $"Reservation API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
+            
                 var reservations = JsonConvert.DeserializeObject<List<ReservationDto>>(response.Content!);
 
                 _logger.LogInformation(
                     "Reservation API call {Method} {RequestUrl} successfully. To got reservation by username {UserName}",
                     request.Method, requestUrl, userName);
 
-                return reservations!;
+                return ServiceResponse<List<ReservationDto>>.Success(reservations!);
             },
-            () => throw new Exception("Reservation Service is unavailable"));
+            ServiceResponse<List<ReservationDto>>.ServiceUnavailable("Reservation Service"));
     }
 }

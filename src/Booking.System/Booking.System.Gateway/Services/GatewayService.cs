@@ -28,359 +28,302 @@ public class GatewayService : IGatewayService
 
     public async Task<ServiceResponse<HotelPagesDto>> GetHotelsAsync(int page, int size)
     {
-        try
+        var response = await _reservationClient.GetHotelsPageAsync(page, size);
+        
+        if (!response.IsSuccess)
         {
-            var hotels = await _reservationClient.GetHotelsPageAsync(page, size);
-            return ServiceResponse<HotelPagesDto>.Success(hotels);
+            _logger.LogError("Error getting hotels page {Page} size {Size}: {Error}", 
+                page, size, response.GetErrorMessage());
+            return response;
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting hotels page {Page} size {Size}", page, size);
-            return ServiceResponse<HotelPagesDto>.ErrorResponse("Ошибка при получении списка отелей", 500);
-        }
+        
+        return response;
     }
 
     public async Task<ServiceResponse<UserInfoDto>> GetUserInfoAsync(string username)
     {
-        try
+        // 1. Получаем бронирования
+        var reservationsResponse = await _reservationClient.GetReservationByUsername(username);
+        if (!reservationsResponse.IsSuccess)
         {
-            // 1. Получаем бронирования - критичный сервис
-            var reservationsResponse = await _reservationClient.GetReservationByUsername(username);
-            if (reservationsResponse == null || reservationsResponse.Count == 0)
-            {
-                // Если нет бронирований, возвращаем пустой список с информацией о лояльности
-                var loyaltyResponse = await GetLoyaltyWithFallback(username);
-                return ServiceResponse<UserInfoDto>.Success(new UserInfoDto(
-                    new List<ReservationDtoWithHotelAndPayment>(), 
-                    loyaltyResponse
-                ));
-            }
-
-            var reservationsWithDetails = new List<ReservationDtoWithHotelAndPayment>();
-
-            foreach (var reservation in reservationsResponse)
-            {
-                var reservationDetail = await GetReservationDetailsAsync(reservation);
-                if (reservationDetail != null)
-                {
-                    reservationsWithDetails.Add(reservationDetail);
-                }
-            }
-
-            // 2. Получаем информацию о лояльности с fallback
-            var loyaltyInfo = await GetLoyaltyWithFallback(username);
-
-            var userInfo = new UserInfoDto(reservationsWithDetails, loyaltyInfo);
-            return ServiceResponse<UserInfoDto>.Success(userInfo);
+            _logger.LogWarning("Error getting reservations for user {Username}: {Error}", 
+                username, reservationsResponse.GetErrorMessage());
+            // Для метода /me продолжаем с пустыми бронированиями
         }
-        catch (Exception ex)
+
+        var reservations = reservationsResponse.IsSuccess ? reservationsResponse.Response : new List<ReservationDto>();
+
+        var reservationsWithDetails = new List<ReservationDtoWithHotelAndPayment>();
+
+        foreach (var reservation in reservations)
         {
-            _logger.LogError(ex, "Error getting user info for {Username}", username);
-            return ServiceResponse<UserInfoDto>.ErrorResponse("Ошибка при получении информации о пользователе", 500);
+            var reservationDetail = await GetReservationDetailsAsync(reservation);
+            if (reservationDetail != null)
+            {
+                reservationsWithDetails.Add(reservationDetail);
+            }
         }
+
+        // 2. Получаем информацию о лояльности
+        var loyaltyResponse = await _loyaltyClient.GetLoyaltyAsync(username);
+        var loyaltyInfo = loyaltyResponse.IsSuccess ? 
+            loyaltyResponse.Response : 
+            new LoyaltyInfoDto("BRONZE", 0, 0);
+
+        var userInfo = new UserInfoDto(reservationsWithDetails, loyaltyInfo);
+        return ServiceResponse<UserInfoDto>.Success(userInfo);
     }
 
     public async Task<ServiceResponse<List<ReservationDtoWithHotelAndPayment>>> GetUserReservationsAsync(string username)
     {
-        try
+        var reservationsResponse = await _reservationClient.GetReservationByUsername(username);
+        
+        if (!reservationsResponse.IsSuccess)
         {
-            var reservationsResponse = await _reservationClient.GetReservationByUsername(username);
-            if (reservationsResponse == null || reservationsResponse.Count == 0)
-            {
-                return ServiceResponse<List<ReservationDtoWithHotelAndPayment>>.Success(
-                    new List<ReservationDtoWithHotelAndPayment>());
-            }
-
-            var result = new List<ReservationDtoWithHotelAndPayment>();
-
-            foreach (var reservation in reservationsResponse)
-            {
-                var reservationDetail = await GetReservationDetailsAsync(reservation);
-                if (reservationDetail != null)
-                {
-                    result.Add(reservationDetail);
-                }
-            }
-
-            return ServiceResponse<List<ReservationDtoWithHotelAndPayment>>.Success(result);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting reservations for {Username}", username);
+            _logger.LogError("Error getting reservations for {Username}: {Error}", 
+                username, reservationsResponse.GetErrorMessage());
             return ServiceResponse<List<ReservationDtoWithHotelAndPayment>>.ErrorResponse(
-                "Ошибка при получении списка бронирований", 500);
+                reservationsResponse.GetErrorMessage(), reservationsResponse.StatusCode);
         }
+
+        var reservations = reservationsResponse.Response ?? new List<ReservationDto>();
+        var result = new List<ReservationDtoWithHotelAndPayment>();
+
+        foreach (var reservation in reservations)
+        {
+            var reservationDetail = await GetReservationDetailsAsync(reservation);
+            if (reservationDetail != null)
+            {
+                result.Add(reservationDetail);
+            }
+        }
+
+        return ServiceResponse<List<ReservationDtoWithHotelAndPayment>>.Success(result);
     }
 
     public async Task<ServiceResponse<ReservationDtoWithHotelAndPayment?>> GetReservationAsync(string username, Guid reservationUid)
     {
-        try
+        var reservationResponse = await _reservationClient.GetReservationById(reservationUid);
+        
+        if (!reservationResponse.IsSuccess)
         {
-            var reservation = await _reservationClient.GetReservationById(reservationUid);
-            if (reservation == null)
-            {
-                return ServiceResponse<ReservationDtoWithHotelAndPayment?>.ErrorResponse(
-                    "Бронирование не найдено", 404);
-            }
-            
-
-            var reservationDetail = await GetReservationDetailsAsync(reservation);
-            return ServiceResponse<ReservationDtoWithHotelAndPayment?>.Success(reservationDetail);
+            _logger.LogWarning("Reservation {ReservationUid} not found for user {Username}: {Error}", 
+                reservationUid, username, reservationResponse.GetErrorMessage());
+            return ServiceResponse<ReservationDtoWithHotelAndPayment?>.ErrorResponse(
+                reservationResponse.GetErrorMessage(), reservationResponse.StatusCode);
         }
-        catch (ReservationNotFoundException ex)
+
+        var reservation = reservationResponse.Response;
+        if (reservation == null)
         {
-            _logger.LogWarning(ex, "Reservation {ReservationUid} not found for user {Username}", reservationUid, username);
             return ServiceResponse<ReservationDtoWithHotelAndPayment?>.ErrorResponse(
                 "Бронирование не найдено", 404);
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting reservation {ReservationUid} for user {Username}", 
-                reservationUid, username);
-            return ServiceResponse<ReservationDtoWithHotelAndPayment?>.ErrorResponse(
-                "Ошибка при получении информации о бронировании", 500);
-        }
+
+        var reservationDetail = await GetReservationDetailsAsync(reservation);
+        return ServiceResponse<ReservationDtoWithHotelAndPayment?>.Success(reservationDetail);
     }
 
     public async Task<ServiceResponse<CreateReservationResponse?>> CreateReservationAsync(
         string username, CreateReservationRequest request)
     {
-        try
+        _logger.LogInformation("Starting reservation creation for user: {Username}, hotel: {HotelUid}", 
+            username, request.HotelUid);
+
+        // 1. Получаем информацию об отеле
+        var hotelResponse = await _reservationClient.GetHotelByIdAsync(request.HotelUid);
+        if (!hotelResponse.IsSuccess)
         {
-            _logger.LogInformation("Starting reservation creation for user: {Username}, hotel: {HotelUid}", 
-                username, request.HotelUid);
-
-            // 1. Получаем информацию об отеле - критичный
-            var hotel = await _reservationClient.GetHotelByIdAsync(request.HotelUid);
-            if (hotel == null)
-            {
-                return ServiceResponse<CreateReservationResponse?>.ErrorResponse("Отель не найден", 404);
-            }
-
-            // 2. Получаем информацию о лояльности с fallback
-            var loyaltyResponse = await _loyaltyClient.GetLoyaltyAsync(username);
-            var loyaltyInfo = loyaltyResponse ?? new LoyaltyInfoDto("UNKNOWN",0,0) { Discount = 0, ReservationCount = 0 };
-
-            // 3. Рассчитываем стоимость
-            var (totalPrice, countDays) = CalculateReservationPrice(request, hotel, loyaltyInfo);
-
-            // 4. Создаем платеж - критичный
-            var paymentUid = await _paymentClient.CreatePaymentAsync(totalPrice);
-            var payment = await _paymentClient.GetPaymentAsync(paymentUid);
-
-            // 5. Создаем бронирование - критичный
-            var reservationUid = Guid.NewGuid();
-            await _reservationClient.CreateReservation(new CreateReservationDto(
-                reservationUid, username, paymentUid, request.HotelUid, request.StartDate, request.EndDate));
-
-            // 6. Обновляем счетчик бронирований - не критичный, идет в retry queue при ошибке
-            try
-            {
-                await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, true);
-            }
-            catch (Exception e)
-            {
-                _logger.LogWarning("Loyalty service unavailable for reservation creation, adding to retry queue");
-                
-                _retryQueue.Enqueue(new RetryItem
-                {
-                    OperationType = "UpdateLoyaltyAfterReservation",
-                    Username = username,
-                    Data = new { Increment = true },
-                    Action = async () =>
-                    {
-                        try
-                        {
-                            await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, true);
-                            return true;
-                        }
-                        catch (Exception exception)
-                        {
-                            return false;
-                        }
-                    }
-                });
-            }
-
-            var response = new CreateReservationResponse(
-                reservationUid,
-                request.HotelUid,
-                DateOnly.FromDateTime(request.StartDate),
-                DateOnly.FromDateTime(request.EndDate),
-                loyaltyInfo.Discount,
-                payment.Status,
-                payment
-            );
-
-            _logger.LogInformation("Reservation created successfully: {ReservationUid}", reservationUid);
-            return ServiceResponse<CreateReservationResponse?>.Success(response);
+            _logger.LogWarning("Hotel {HotelUid} not found for reservation creation: {Error}", 
+                request.HotelUid, hotelResponse.GetErrorMessage());
+            return ServiceResponse<CreateReservationResponse?>.ErrorResponse(
+                "Отель не найден", 404);
         }
-        catch (HotelNotFoundException ex)
+        var hotel = hotelResponse.Response!;
+
+        // 2. Получаем информацию о лояльности
+        var loyaltyResponse = await _loyaltyClient.GetLoyaltyAsync(username);
+        var loyaltyInfo = loyaltyResponse.IsSuccess ? 
+            loyaltyResponse.Response! : 
+            new LoyaltyInfoDto("BRONZE", 0, 0);
+
+        // 3. Рассчитываем стоимость
+        var (totalPrice, countDays) = CalculateReservationPrice(request, hotel, loyaltyInfo);
+
+        // 4. Создаем платеж
+        var paymentUidResponse = await _paymentClient.CreatePaymentAsync(totalPrice);
+        if (!paymentUidResponse.IsSuccess)
         {
-            _logger.LogWarning(ex, "Hotel {HotelUid} not found for reservation creation", request.HotelUid);
-            return ServiceResponse<CreateReservationResponse?>.ErrorResponse("Отель не найден", 404);
+            _logger.LogError("Error creating payment for reservation: {Error}", paymentUidResponse.GetErrorMessage());
+            return ServiceResponse<CreateReservationResponse?>.ErrorResponse(
+                "Ошибка при создании платежа", 500);
         }
-        catch (Exception ex)
+        var paymentUid = paymentUidResponse.Response;
+
+        var paymentResponse = await _paymentClient.GetPaymentAsync(paymentUid);
+        var payment = paymentResponse.IsSuccess ? paymentResponse.Response! : new PaymentInfoDto("PAID", totalPrice);
+
+        // 5. Создаем бронирование
+        var reservationUid = Guid.NewGuid();
+        var createReservationResponse = await _reservationClient.CreateReservation(new CreateReservationDto(
+            reservationUid, username, paymentUid, request.HotelUid, request.StartDate, request.EndDate));
+
+        if (!createReservationResponse.IsSuccess)
         {
-            _logger.LogError(ex, "Error creating reservation for user {Username}", username);
+            _logger.LogError("Error creating reservation: {Error}", createReservationResponse.GetErrorMessage());
             return ServiceResponse<CreateReservationResponse?>.ErrorResponse(
                 "Ошибка при создании бронирования", 500);
         }
+
+        // 6. Обновляем счетчик бронирований (не критичный)
+        var loyaltyUpdateResponse = await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, true);
+        if (!loyaltyUpdateResponse.IsSuccess)
+        {
+            _logger.LogWarning("Loyalty service unavailable for reservation creation, adding to retry queue");
+            
+            _retryQueue.Enqueue(new RetryItem
+            {
+                OperationType = "UpdateLoyaltyAfterReservation",
+                Username = username,
+                Data = new { Increment = true },
+                Action = async () =>
+                {
+                    var retryResponse = await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, true);
+                    return retryResponse.IsSuccess;
+                }
+            });
+        }
+
+        var response = new CreateReservationResponse(
+            reservationUid,
+            request.HotelUid,
+            DateOnly.FromDateTime(request.StartDate),
+            DateOnly.FromDateTime(request.EndDate),
+            loyaltyInfo.Discount,
+            payment.Status,
+            payment
+        );
+
+        _logger.LogInformation("Reservation created successfully: {ReservationUid}", reservationUid);
+        return ServiceResponse<CreateReservationResponse?>.Success(response);
     }
 
     public async Task<ServiceResponse<bool>> CancelReservationAsync(string username, Guid reservationUid)
     {
-        try
+        // 1. Получаем бронирование
+        var reservationResponse = await _reservationClient.GetReservationById(reservationUid);
+        if (!reservationResponse.IsSuccess)
         {
-            // 1. Получаем бронирование для проверки принадлежности
-            var reservation = await _reservationClient.GetReservationById(reservationUid);
-            if (reservation == null)
-            {
-                return ServiceResponse<bool>.ErrorResponse("Бронирование не найдено", 404);
-            }
-
-            // 2. Отменяем бронирование - критичный
-            await _reservationClient.CancelReservation(reservationUid);
-
-            // 3. Обновляем платеж - критичный
-            await _paymentClient.UpdatePaymentAsync(reservation.PaymentUid);
-
-            // 4. Обновляем счетчик лояльности - не критичный, идет в retry queue при ошибке
-            try
-            {
-                await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, false);
-            }
-            catch(Exception)
-            {
-                _logger.LogWarning("Loyalty service unavailable for reservation cancellation, adding to retry queue");
-                
-                _retryQueue.Enqueue(new RetryItem
-                {
-                    OperationType = "UpdateLoyaltyAfterCancellation",
-                    Username = username,
-                    Data = new { Increment = false },
-                    Action = async () =>
-                    {
-                        try
-                        {
-                            await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, false);
-                            return true;
-                        }
-                        catch (Exception e)
-                        {
-                            return false;
-                        }
-                    }
-                });
-            }
-
-            _logger.LogInformation("Reservation {ReservationUid} cancelled successfully", reservationUid);
-            return ServiceResponse<bool>.Success(true);
-        }
-        catch (ReservationNotFoundException ex)
-        {
-            _logger.LogWarning(ex, "Reservation {ReservationUid} not found for cancellation", reservationUid);
+            _logger.LogWarning("Reservation {ReservationUid} not found for cancellation: {Error}", 
+                reservationUid, reservationResponse.GetErrorMessage());
             return ServiceResponse<bool>.ErrorResponse("Бронирование не найдено", 404);
         }
-        catch (Exception ex)
+        var reservation = reservationResponse.Response!;
+
+        // 2. Отменяем бронирование
+        var cancelResponse = await _reservationClient.CancelReservation(reservationUid);
+        if (!cancelResponse.IsSuccess)
         {
-            _logger.LogError(ex, "Error cancelling reservation {ReservationUid} for user {Username}", 
-                reservationUid, username);
+            _logger.LogError("Error cancelling reservation {ReservationUid}: {Error}", 
+                reservationUid, cancelResponse.GetErrorMessage());
             return ServiceResponse<bool>.ErrorResponse("Ошибка при отмене бронирования", 500);
         }
+
+        // 3. Обновляем платеж
+        var paymentUpdateResponse = await _paymentClient.UpdatePaymentAsync(reservation.PaymentUid);
+        if (!paymentUpdateResponse.IsSuccess)
+        {
+            _logger.LogWarning("Error updating payment for reservation {ReservationUid}: {Error}", 
+                reservationUid, paymentUpdateResponse.GetErrorMessage());
+            // Продолжаем, так как это не критично для отмены
+        }
+
+        // 4. Обновляем счетчик лояльности (не критичный)
+        var loyaltyUpdateResponse = await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, false);
+        if (!loyaltyUpdateResponse.IsSuccess)
+        {
+            _logger.LogWarning("Loyalty service unavailable for reservation cancellation, adding to retry queue");
+            
+            _retryQueue.Enqueue(new RetryItem
+            {
+                OperationType = "UpdateLoyaltyAfterCancellation",
+                Username = username,
+                Data = new { Increment = false },
+                Action = async () =>
+                {
+                    var retryResponse = await _loyaltyClient.UpdateLoyaltyReservationCountAsync(username, false);
+                    return retryResponse.IsSuccess;
+                }
+            });
+        }
+
+        _logger.LogInformation("Reservation {ReservationUid} cancelled successfully", reservationUid);
+        return ServiceResponse<bool>.Success(true);
     }
 
     public async Task<ServiceResponse<LoyaltyInfoDto>> GetLoyaltyInfoAsync(string username)
     {
-        try
+        var response = await _loyaltyClient.GetLoyaltyAsync(username);
+        
+        if (!response.IsSuccess)
         {
-            var loyaltyInfo = await _loyaltyClient.GetLoyaltyAsync(username);
-            if (loyaltyInfo == null)
-            {
-                return ServiceResponse<LoyaltyInfoDto>.ErrorResponse(
-                    "Информация о программе лояльности не найдена", 404);
-            }
-
-            return ServiceResponse<LoyaltyInfoDto>.Success(loyaltyInfo);
+            _logger.LogError("Error getting loyalty info for {Username}: {Error}", 
+                username, response.GetErrorMessage());
         }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error getting loyalty info for {Username}", username);
-            return ServiceResponse<LoyaltyInfoDto>.ErrorResponse(
-                "Ошибка при получении информации о лояльности", 500);
-        }
+        
+        return response;
     }
 
     // Вспомогательные методы
     private async Task<ReservationDtoWithHotelAndPayment?> GetReservationDetailsAsync(ReservationDto reservation)
     {
-        try
+        // Получаем информацию об отеле
+        HotelDto? hotel = null;
+        var hotelResponse = await _reservationClient.GetHotelByIdAsync(reservation.HotelUid);
+        if (hotelResponse.IsSuccess)
         {
-            // Получаем информацию об отеле с fallback
-            HotelDto? hotel = null;
-            try
-            {
-                hotel = await _reservationClient.GetHotelByIdAsync(reservation.HotelUid);
-            }
-            catch (HotelNotFoundException ex)
-            {
-                _logger.LogWarning(ex, "Hotel {HotelUid} not found for reservation {ReservationUid}", 
-                    reservation.HotelUid, reservation.ReservationUid);
-                hotel = CreateFallbackHotel(reservation.HotelUid);
-            }
-
-            // Получаем информацию о платеже с fallback
-            PaymentInfoDto? payment = null;
-            try
-            {
-                payment = await _paymentClient.GetPaymentAsync(reservation.PaymentUid);
-            }
-            catch (PaymentNotFoundException ex)
-            {
-                _logger.LogWarning(ex, "Payment {PaymentUid} not found for reservation {ReservationUid}", 
-                    reservation.PaymentUid, reservation.ReservationUid);
-                payment = CreateFallbackPayment();
-            }
-
-            var fullAddress = hotel != null ? 
-                $"{hotel.Country}, {hotel.City}, {hotel.Address}" : 
-                "Адрес недоступен";
-
-            var hotelDtoWithFullAddress = new HotelDtoWithFullAddress(
-                reservation.HotelUid,
-                hotel?.Name ?? "Неизвестный отель",
-                fullAddress,
-                hotel?.Stars ?? 0
-            );
-
-            return new ReservationDtoWithHotelAndPayment(
-                reservation.ReservationUid,
-                hotelDtoWithFullAddress,
-                DateOnly.FromDateTime(reservation.StartDate),
-                DateOnly.FromDateTime(reservation.EndDate),
-                reservation.Status,
-                payment
-            );
+            hotel = hotelResponse.Response;
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogError(ex, "Error getting details for reservation {ReservationUid}", reservation.ReservationUid);
-            return null;
+            _logger.LogWarning("Hotel {HotelUid} not found for reservation {ReservationUid}: {Error}", 
+                reservation.HotelUid, reservation.ReservationUid, hotelResponse.GetErrorMessage());
+            hotel = CreateFallbackHotel(reservation.HotelUid);
         }
-    }
 
-    private async Task<LoyaltyInfoDto> GetLoyaltyWithFallback(string username)
-    {
-        try
+        // Получаем информацию о платеже
+        PaymentInfoDto? payment = null;
+        var paymentResponse = await _paymentClient.GetPaymentAsync(reservation.PaymentUid);
+        if (paymentResponse.IsSuccess)
         {
-            var loyaltyInfo = await _loyaltyClient.GetLoyaltyAsync(username);
-            return loyaltyInfo ?? new LoyaltyInfoDto("UNKNOWN", 0,0);
+            payment = paymentResponse.Response;
         }
-        catch (Exception ex)
+        else
         {
-            _logger.LogWarning(ex, "Loyalty service unavailable for user {Username}, using fallback", username);
-            return new LoyaltyInfoDto("UNKNOWN", 0,0);
+            _logger.LogWarning("Payment {PaymentUid} not found for reservation {ReservationUid}: {Error}", 
+                reservation.PaymentUid, reservation.ReservationUid, paymentResponse.GetErrorMessage());
+            payment = CreateFallbackPayment();
         }
+
+        var fullAddress = hotel != null ? 
+            $"{hotel.Country}, {hotel.City}, {hotel.Address}" : 
+            "Адрес недоступен";
+
+        var hotelDtoWithFullAddress = new HotelDtoWithFullAddress(
+            reservation.HotelUid,
+            hotel?.Name ?? "Неизвестный отель",
+            fullAddress,
+            hotel?.Stars ?? 0
+        );
+
+        return new ReservationDtoWithHotelAndPayment(
+            reservation.ReservationUid,
+            hotelDtoWithFullAddress,
+            DateOnly.FromDateTime(reservation.StartDate),
+            DateOnly.FromDateTime(reservation.EndDate),
+            reservation.Status,
+            payment
+        );
     }
 
     private (int TotalPrice, int CountDays) CalculateReservationPrice(

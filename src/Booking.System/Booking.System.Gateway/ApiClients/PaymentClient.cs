@@ -43,9 +43,8 @@ public class PaymentClient: IPaymentClient
         }
     }
     
-    public async Task<PaymentInfoDto> GetPaymentAsync(Guid paymentId)
+    public async Task<ServiceResponse<PaymentInfoDto>> GetPaymentAsync(Guid paymentId)
     {
-        // Payment Service не критичен для операций получения - возвращаем fallback
         return await _circuitBreaker.ExecuteAsync(
             "PaymentService",
             async () =>
@@ -59,27 +58,32 @@ public class PaymentClient: IPaymentClient
                 var response = await _client.GetAsync(request);
 
                 if (response.StatusCode == HttpStatusCode.BadRequest)
-                    throw new PaymentNotFoundException("No payment was found");
+                {
+                    return ServiceResponse<PaymentInfoDto>.ErrorResponse(
+                        "No payment was found", 
+                        (int)HttpStatusCode.BadRequest);
+                }
+
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<PaymentInfoDto>.ErrorResponse(
+                        $"Payment API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
 
                 var paymentInfoDto = JsonConvert.DeserializeObject<PaymentInfoDto>(response.Content!);
 
                 _logger.LogInformation("Payment API call {Method} {RequestUrl} successfully. Payment {PaymentId} was got",
                     request.Method, requestUrl, paymentId);
 
-                return paymentInfoDto!;
+                return ServiceResponse<PaymentInfoDto>.Success(paymentInfoDto!);
             },
-            () => 
-            {
-                _logger.LogWarning("Payment Service unavailable, returning fallback for payment {PaymentId}", paymentId);
-                // Возвращаем fallback с пустыми данными о платеже
-                return new PaymentInfoDto("UNKNOWN", 0);
-            });
+            ServiceResponse<PaymentInfoDto>.Fallback(new PaymentInfoDto("UNKNOWN", 0)));
     }
 
-    public async Task UpdatePaymentAsync(Guid paymentId)
+    public async Task<ServiceResponse<bool>> UpdatePaymentAsync(Guid paymentId)
     {
-        // Для операций обновления считаем сервис критичным
-        await _circuitBreaker.ExecuteAsync(
+        return await _circuitBreaker.ExecuteAsync(
             "PaymentService",
             async () =>
             {
@@ -90,26 +94,31 @@ public class PaymentClient: IPaymentClient
                     request.Method, requestUrl, paymentId);
 
                 var response = await _client.PutAsync(request);
-                
+            
                 if (response.StatusCode == HttpStatusCode.BadRequest)
-                    throw new PaymentNotFoundException("No payment was found");
+                {
+                    return ServiceResponse<bool>.ErrorResponse(
+                        "No payment was found", 
+                        (int)HttpStatusCode.BadRequest);
+                }
+
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<bool>.ErrorResponse(
+                        $"Payment API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
 
                 _logger.LogInformation(
                     "Payment API call {Method} {RequestUrl} successfully. Payment {PaymentId} was updated",
                     request.Method, requestUrl, paymentId);
 
-                return true;
+                return ServiceResponse<bool>.Success(true);
             },
-            () => 
-            {
-                _logger.LogError("Payment Service unavailable for critical update operation for payment {PaymentId}", paymentId);
-                throw new Exception("Payment Service is unavailable for update operation");
-            });
+            ServiceResponse<bool>.ServiceUnavailable("Payment Service")); // Для критичных операций
     }
-    
-    public async Task<Guid> CreatePaymentAsync(int price)
+    public async Task<ServiceResponse<Guid>> CreatePaymentAsync(int price)
     {
-        // Создание платежа критично - бросаем исключение при недоступности
         return await _circuitBreaker.ExecuteAsync(
             "PaymentService",
             async () =>
@@ -121,20 +130,24 @@ public class PaymentClient: IPaymentClient
                     request.Method, requestUrl, price);
 
                 var response = await _client.PostAsync(request);
-                
+            
+                // Обработка ошибок HTTP
+                if (!response.IsSuccessful)
+                {
+                    return ServiceResponse<Guid>.ErrorResponse(
+                        $"Payment API returned error: {response.StatusCode}", 
+                        (int)response.StatusCode);
+                }
+
                 var paymentIdDto = JsonConvert.DeserializeObject<PaymentIdDto>(response.Content!);
 
                 _logger.LogInformation(
                     "Payment API call {Method} {RequestUrl} successfully. Payment with price {Price} was created",
                     request.Method, requestUrl, price);
 
-                return paymentIdDto!.PaymentId;
+                return ServiceResponse<Guid>.Success(paymentIdDto!.PaymentId);
             },
-            () => 
-            {
-                _logger.LogError("Payment Service unavailable for critical payment creation with price {Price}", price);
-                throw new Exception("Payment Service is unavailable for payment creation");
-            });
+            ServiceResponse<Guid>.ServiceUnavailable("Payment Service"));
     }
     
     private class PaymentIdDto

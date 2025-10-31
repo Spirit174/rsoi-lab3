@@ -14,19 +14,19 @@ public interface IPaymentClient
     /// <param name="paymentId">Идентификатор платежа.</param>
     /// <returns>Информация о платеже.</returns>
     /// <exception cref="PaymentNotFoundException">Выбрасывается, если платеж не найден.</exception>
-    Task<PaymentInfoDto> GetPaymentAsync(Guid paymentId);
+    Task<ServiceResponse<PaymentInfoDto>> GetPaymentAsync(Guid paymentId);
 
     /// <summary>
     /// Обновляет информацию о платеже.
     /// </summary>
     /// <param name="paymentId">Идентификатор платежа для обновления.</param>
     /// <exception cref="PaymentNotFoundException">Выбрасывается, если платеж не найден.</exception>
-    Task UpdatePaymentAsync(Guid paymentId);
+    Task<ServiceResponse<bool>> UpdatePaymentAsync(Guid paymentId);
 
     /// <summary>
     /// Создает новый платеж.
     /// </summary>
     /// <param name="price">Сумма платежа.</param>
     /// <returns>Идентификатор созданного платежа.</returns>
-    Task<Guid> CreatePaymentAsync(int price);
+    Task<ServiceResponse<Guid>> CreatePaymentAsync(int price);
 }

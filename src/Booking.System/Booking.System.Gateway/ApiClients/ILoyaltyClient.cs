@@ -12,12 +12,12 @@ public interface ILoyaltyClient
     /// </summary>
     /// <param name="userName">Имя пользователя для получения информации о лояльности.</param>
     /// <returns>Информация о лояльности пользователя.</returns>
-    Task<LoyaltyInfoDto> GetLoyaltyAsync(string userName);
+    Task<ServiceResponse<LoyaltyInfoDto>> GetLoyaltyAsync(string userName);
 
     /// <summary>
     /// Обновляет счетчик бронирований пользователя.
     /// </summary>
     /// <param name="userName">Имя пользователя для обновления.</param>
     /// <param name="isIncrease">True - увеличить счетчик, False - уменьшить счетчик.</param>
-    Task UpdateLoyaltyReservationCountAsync(string userName, bool isIncrease);
+    Task<ServiceResponse<bool>> UpdateLoyaltyReservationCountAsync(string userName, bool isIncrease);
 }
